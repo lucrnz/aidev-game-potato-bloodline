@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { CONFIG } from '../config.js';
 
 export class Enemy extends Phaser.GameObjects.Graphics {
-  constructor(scene, x, y) {
+  constructor(scene, x, y, stats = {}) {
     super(scene);
     
     this.scene = scene;
@@ -10,12 +10,13 @@ export class Enemy extends Phaser.GameObjects.Graphics {
     this.y = y;
     this.active = true;
     
-    const { radius, color, borderColor, borderThickness, speed, hp, damage, xpValue } = CONFIG.enemy;
+    const { radius, damage, xpValue, scoreValue } = CONFIG.enemy;
     this.radius = radius;
-    this.speed = speed;
-    this.maxHp = hp;
-    this.hp = hp;
+    this.speed = stats.speed ?? CONFIG.enemy.baseSpeed;
+    this.maxHp = stats.hp ?? CONFIG.enemy.baseHp;
+    this.hp = this.maxHp;
     this.damage = damage;
+    this.scoreValue = scoreValue;
     this.xpValue = xpValue;
     
     this.draw();
