@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { CONFIG } from './config.js';
+import { WeaponSelectScene } from './scenes/WeaponSelectScene.js';
 import { GameScene } from './scenes/GameScene.js';
 
 const config = {
@@ -8,7 +9,7 @@ const config = {
   height: CONFIG.game.height,
   parent: 'game-container',
   backgroundColor: CONFIG.game.backgroundColor,
-  scene: [GameScene],
+  scene: [WeaponSelectScene, GameScene],
   physics: {
     default: 'arcade',
     arcade: {
