@@ -1,10 +1,12 @@
-import Phaser from 'phaser';
-
 export class Weapon {
-  constructor(scene, config) {
+  constructor(scene, definition, stats) {
     this.scene = scene;
-    this.config = config;
-    this.name = config.name;
+    this.definition = definition;
+    this.stats = stats;
+    this.id = definition.id;
+    this.name = definition.name;
+    this.type = definition.type;
+    this.category = definition.category;
     this.active = true;
   }
 
