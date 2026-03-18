@@ -3,7 +3,8 @@ import { CONFIG } from '../config.js';
 import { Enemy } from '../gameobjects/Enemy.js';
 import { XpGem } from '../gameobjects/XpGem.js';
 import { KnifeWeapon } from '../weapons/KnifeWeapon.js';
-import { GarlicWeapon } from '../weapons/GarlicWeapon.js';
+import { FirearmWeapon } from '../weapons/FirearmWeapon.js';
+import { DamageAuraAbility } from '../abilities/DamageAuraAbility.js';
 
 export class GameScene extends Phaser.Scene {
   constructor() {
@@ -13,22 +14,34 @@ export class GameScene extends Phaser.Scene {
     this.enemies = [];
     this.xpGems = [];
     this.weapons = [];
+    this.abilities = [];
+    this.weaponState = new Map();
+    this.abilityState = new Map();
     this.enemiesSpawned = 0;
     this.isWaveActive = false;
     this.isPaused = false;
     this.damageNumbers = [];
     this.isUpgradeMenuOpen = false;
     this.pendingLevelUps = 0;
+    this.pendingStore = false;
+    this.isStoreOpen = false;
+    this.isPauseMenuOpen = false;
+    this.isPauseConfirmOpen = false;
+    this.score = 0;
+    this.crystals = 0;
   }
 
-  create() {
+  create(data) {
     this.resetPlayerStats();
     this.createArena();
     this.createPlayer();
     this.createUI();
     this.createUpgradeUI();
+    this.createStoreUI();
+    this.createPauseMenuUI();
+    this.createHud();
     this.setupInput();
-    this.initializeWeapons();
+    this.initializeCombatLoadout(data?.starterWeaponId);
     this.startWave();
   }
 
@@ -47,7 +60,15 @@ export class GameScene extends Phaser.Scene {
       maxHpBonus: 0,
       xpMagnetMultiplier: 1,
       damageReduction: 0,
+      sightMultiplier: 1,
     };
+
+    this.pendingStore = false;
+    this.isStoreOpen = false;
+    this.isPauseMenuOpen = false;
+    this.isPauseConfirmOpen = false;
+    this.score = 0;
+    this.crystals = 0;
   }
 
   createArena() {
@@ -163,7 +184,7 @@ export class GameScene extends Phaser.Scene {
       CONFIG.game.width / 2,
       CONFIG.game.height / 2 + 100,
       'Restart',
-      () => this.scene.restart()
+      () => this.scene.start('WeaponSelectScene')
     );
     this.restartButton.container.setVisible(false);
 
@@ -305,6 +326,249 @@ export class GameScene extends Phaser.Scene {
     this.upgradeCards = [];
   }
 
+  createHud() {
+    this.hudContainer = this.add.container(0, 0);
+    this.hudContainer.setDepth(180);
+    this.hudContainer.setScrollFactor(0);
+
+    const hudBg = this.add.graphics();
+    hudBg.fillStyle(0x101020, 0.75);
+    hudBg.fillRoundedRect(20, CONFIG.game.height - 170, 360, 140, 12);
+    hudBg.lineStyle(2, 0x4a4a6a, 1);
+    hudBg.strokeRoundedRect(20, CONFIG.game.height - 170, 360, 140, 12);
+    this.hudContainer.add(hudBg);
+
+    const itemBg = this.add.graphics();
+    itemBg.fillStyle(0x101020, 0.75);
+    itemBg.fillRoundedRect(CONFIG.game.width - 380, CONFIG.game.height - 170, 360, 140, 12);
+    itemBg.lineStyle(2, 0x4a4a6a, 1);
+    itemBg.strokeRoundedRect(CONFIG.game.width - 380, CONFIG.game.height - 170, 360, 140, 12);
+    this.hudContainer.add(itemBg);
+
+    this.weaponHudTitle = this.add.text(40, CONFIG.game.height - 160, 'Weapons', {
+      fontSize: '18px',
+      fontFamily: 'Arial',
+      color: '#ffffff',
+      fontStyle: 'bold',
+    });
+    this.hudContainer.add(this.weaponHudTitle);
+
+    this.itemHudTitle = this.add.text(CONFIG.game.width - 360, CONFIG.game.height - 160, 'Items', {
+      fontSize: '18px',
+      fontFamily: 'Arial',
+      color: '#ffffff',
+      fontStyle: 'bold',
+    });
+    this.hudContainer.add(this.itemHudTitle);
+
+    this.weaponHudText = this.add.text(40, CONFIG.game.height - 130, '', {
+      fontSize: '14px',
+      fontFamily: 'Arial',
+      color: '#cccccc',
+      lineSpacing: 4,
+    });
+    this.hudContainer.add(this.weaponHudText);
+
+    this.itemHudText = this.add.text(CONFIG.game.width - 360, CONFIG.game.height - 130, '', {
+      fontSize: '14px',
+      fontFamily: 'Arial',
+      color: '#cccccc',
+      lineSpacing: 4,
+    });
+    this.hudContainer.add(this.itemHudText);
+
+    this.scoreText = this.add.text(CONFIG.game.width / 2, 24, 'Score: 0', {
+      fontSize: '18px',
+      fontFamily: 'Arial',
+      color: '#ffffff',
+      fontStyle: 'bold',
+    });
+    this.scoreText.setOrigin(0.5, 0);
+    this.scoreText.setDepth(120);
+
+    this.crystalText = this.add.text(CONFIG.game.width / 2, 44, 'Crystals: 0', {
+      fontSize: '16px',
+      fontFamily: 'Arial',
+      color: '#44ffdd',
+      fontStyle: 'bold',
+    });
+    this.crystalText.setOrigin(0.5, 0);
+    this.crystalText.setDepth(120);
+
+    this.updateHud();
+  }
+
+  createStoreUI() {
+    this.storeContainer = this.add.container(0, 0);
+    this.storeContainer.setDepth(260);
+
+    this.storeBg = this.add.graphics();
+    this.storeBg.fillStyle(0x000000, 0.85);
+    this.storeBg.fillRect(0, 0, CONFIG.game.width, CONFIG.game.height);
+    this.storeBg.setVisible(false);
+    this.storeContainer.add(this.storeBg);
+
+    this.storeTitle = this.add.text(CONFIG.game.width / 2, 110, 'SUPPLY STORE', {
+      fontSize: '52px',
+      fontFamily: 'Arial',
+      color: '#44ffdd',
+      fontStyle: 'bold',
+    });
+    this.storeTitle.setOrigin(0.5, 0.5);
+    this.storeTitle.setVisible(false);
+    this.storeContainer.add(this.storeTitle);
+
+    this.storeSubtitle = this.add.text(CONFIG.game.width / 2, 170, 'Spend crystals to prepare for the next wave', {
+      fontSize: '20px',
+      fontFamily: 'Arial',
+      color: '#aaaaaa',
+    });
+    this.storeSubtitle.setOrigin(0.5, 0.5);
+    this.storeSubtitle.setVisible(false);
+    this.storeContainer.add(this.storeSubtitle);
+
+    this.storeCards = [];
+    this.storeContinueButton = this.createButton(
+      CONFIG.game.width / 2,
+      CONFIG.game.height - 80,
+      'Continue',
+      () => this.hideStore()
+    );
+    this.storeContinueButton.container.setVisible(false);
+  }
+
+  createPauseMenuUI() {
+    this.pauseMenuContainer = this.add.container(0, 0);
+    this.pauseMenuContainer.setDepth(320);
+
+    this.pauseMenuBg = this.add.graphics();
+    this.pauseMenuBg.fillStyle(0x000000, 0.85);
+    this.pauseMenuBg.fillRect(0, 0, CONFIG.game.width, CONFIG.game.height);
+    this.pauseMenuBg.setVisible(false);
+    this.pauseMenuContainer.add(this.pauseMenuBg);
+
+    this.pauseMenuTitle = this.add.text(140, 80, 'PAUSED', {
+      fontSize: '48px',
+      fontFamily: 'Arial',
+      color: '#ffffff',
+      fontStyle: 'bold',
+    });
+    this.pauseMenuTitle.setOrigin(0, 0.5);
+    this.pauseMenuTitle.setVisible(false);
+    this.pauseMenuContainer.add(this.pauseMenuTitle);
+
+    this.pauseMenuSubtitle = this.add.text(140, 130, 'Escape to resume', {
+      fontSize: '18px',
+      fontFamily: 'Arial',
+      color: '#aaaaaa',
+    });
+    this.pauseMenuSubtitle.setOrigin(0, 0.5);
+    this.pauseMenuSubtitle.setVisible(false);
+    this.pauseMenuContainer.add(this.pauseMenuSubtitle);
+
+    this.pauseRestartButton = this.createButton(
+      200,
+      220,
+      'Restart',
+      () => this.openPauseConfirm()
+    );
+    this.pauseRestartButton.container.setVisible(false);
+
+    this.pauseStatsBg = this.add.graphics();
+    this.pauseStatsBg.fillStyle(0x101020, 0.85);
+    this.pauseStatsBg.fillRoundedRect(CONFIG.game.width - 420, 80, 360, CONFIG.game.height - 160, 14);
+    this.pauseStatsBg.lineStyle(2, 0x4a4a6a, 1);
+    this.pauseStatsBg.strokeRoundedRect(CONFIG.game.width - 420, 80, 360, CONFIG.game.height - 160, 14);
+    this.pauseStatsBg.setVisible(false);
+    this.pauseMenuContainer.add(this.pauseStatsBg);
+
+    this.pauseStatsTitle = this.add.text(CONFIG.game.width - 390, 110, 'Loadout & Stats', {
+      fontSize: '20px',
+      fontFamily: 'Arial',
+      color: '#ffffff',
+      fontStyle: 'bold',
+    });
+    this.pauseStatsTitle.setOrigin(0, 0.5);
+    this.pauseStatsTitle.setVisible(false);
+    this.pauseMenuContainer.add(this.pauseStatsTitle);
+
+    this.pauseWeaponsText = this.add.text(CONFIG.game.width - 390, 150, '', {
+      fontSize: '16px',
+      fontFamily: 'Arial',
+      color: '#cccccc',
+      lineSpacing: 6,
+      wordWrap: { width: 320 },
+    });
+    this.pauseWeaponsText.setOrigin(0, 0);
+    this.pauseWeaponsText.setVisible(false);
+    this.pauseMenuContainer.add(this.pauseWeaponsText);
+
+    this.pauseItemsText = this.add.text(CONFIG.game.width - 390, 320, '', {
+      fontSize: '16px',
+      fontFamily: 'Arial',
+      color: '#cccccc',
+      lineSpacing: 6,
+      wordWrap: { width: 320 },
+    });
+    this.pauseItemsText.setOrigin(0, 0);
+    this.pauseItemsText.setVisible(false);
+    this.pauseMenuContainer.add(this.pauseItemsText);
+
+    this.pauseStatsText = this.add.text(CONFIG.game.width - 390, 510, '', {
+      fontSize: '16px',
+      fontFamily: 'Arial',
+      color: '#cccccc',
+      lineSpacing: 6,
+      wordWrap: { width: 320 },
+    });
+    this.pauseStatsText.setOrigin(0, 0);
+    this.pauseStatsText.setVisible(false);
+    this.pauseMenuContainer.add(this.pauseStatsText);
+
+    this.pauseConfirmBg = this.add.graphics();
+    this.pauseConfirmBg.fillStyle(0x000000, 0.9);
+    this.pauseConfirmBg.fillRoundedRect(CONFIG.game.width / 2 - 200, CONFIG.game.height / 2 - 120, 400, 240, 14);
+    this.pauseConfirmBg.lineStyle(2, 0xffdd44, 1);
+    this.pauseConfirmBg.strokeRoundedRect(CONFIG.game.width / 2 - 200, CONFIG.game.height / 2 - 120, 400, 240, 14);
+    this.pauseConfirmBg.setVisible(false);
+    this.pauseMenuContainer.add(this.pauseConfirmBg);
+
+    this.pauseConfirmTitle = this.add.text(CONFIG.game.width / 2, CONFIG.game.height / 2 - 60, 'Restart run?', {
+      fontSize: '26px',
+      fontFamily: 'Arial',
+      color: '#ffffff',
+      fontStyle: 'bold',
+    });
+    this.pauseConfirmTitle.setOrigin(0.5, 0.5);
+    this.pauseConfirmTitle.setVisible(false);
+    this.pauseMenuContainer.add(this.pauseConfirmTitle);
+
+    this.pauseConfirmSubtitle = this.add.text(CONFIG.game.width / 2, CONFIG.game.height / 2 - 20, 'Your current progress will be lost.', {
+      fontSize: '18px',
+      fontFamily: 'Arial',
+      color: '#aaaaaa',
+    });
+    this.pauseConfirmSubtitle.setOrigin(0.5, 0.5);
+    this.pauseConfirmSubtitle.setVisible(false);
+    this.pauseMenuContainer.add(this.pauseConfirmSubtitle);
+
+    this.pauseConfirmYes = this.createButton(
+      CONFIG.game.width / 2 - 90,
+      CONFIG.game.height / 2 + 50,
+      'Restart',
+      () => this.scene.start('WeaponSelectScene')
+    );
+    this.pauseConfirmYes.container.setVisible(false);
+
+    this.pauseConfirmNo = this.createButton(
+      CONFIG.game.width / 2 + 90,
+      CONFIG.game.height / 2 + 50,
+      'Cancel',
+      () => this.closePauseConfirm()
+    );
+    this.pauseConfirmNo.container.setVisible(false);
+  }
+
   showUpgradeMenu() {
     if (this.isUpgradeMenuOpen) {
       this.pendingLevelUps++;
@@ -324,6 +588,7 @@ export class GameScene extends Phaser.Scene {
     this.generateUpgradeChoices();
   }
 
+
   clearUpgradeCards() {
     this.upgradeCards.forEach(card => {
       card.container.destroy();
@@ -334,12 +599,12 @@ export class GameScene extends Phaser.Scene {
 
   generateUpgradeChoices() {
     const { choicesCount, pool, ui } = CONFIG.upgrades;
-    const availableUpgrades = [...pool];
+    const availableChoices = [...pool, ...this.getAvailableWeaponUnlockChoices()];
     const choices = [];
 
-    for (let i = 0; i < Math.min(choicesCount, availableUpgrades.length); i++) {
-      const randomIndex = Phaser.Math.Between(0, availableUpgrades.length - 1);
-      choices.push(availableUpgrades.splice(randomIndex, 1)[0]);
+    for (let i = 0; i < Math.min(choicesCount, availableChoices.length); i++) {
+      const randomIndex = Phaser.Math.Between(0, availableChoices.length - 1);
+      choices.push(availableChoices.splice(randomIndex, 1)[0]);
     }
 
     const totalWidth = (choices.length * ui.cardWidth) + ((choices.length - 1) * ui.cardSpacing);
@@ -424,64 +689,52 @@ export class GameScene extends Phaser.Scene {
   applyUpgrade(upgrade) {
     switch (upgrade.type) {
       case 'stat':
-        if (upgrade.stat === 'heal') {
+        this.playerStats[upgrade.stat] += upgrade.value;
+
+        if (upgrade.stat === 'maxHpBonus') {
+          this.playerMaxHp = CONFIG.player.maxHp + this.playerStats.maxHpBonus;
           this.playerHp = Math.min(this.playerHp + upgrade.value, this.playerMaxHp);
-          this.showDamageNumber(this.player.x, this.player.y - 50, `+${upgrade.value}`, '#44ff44');
-        } else {
-          this.playerStats[upgrade.stat] += upgrade.value;
-          
-          if (upgrade.stat === 'maxHpBonus') {
-            this.playerMaxHp = CONFIG.player.maxHp + this.playerStats.maxHpBonus;
-            this.playerHp = Math.min(this.playerHp + upgrade.value, this.playerMaxHp);
-          }
         }
         break;
 
-      case 'weapon_upgrade':
-        this.upgradeWeapon(upgrade);
+      case 'instant':
+        if (upgrade.stat === 'heal') {
+          this.playerHp = Math.min(this.playerHp + upgrade.value, this.playerMaxHp);
+          this.showDamageNumber(this.player.x, this.player.y - 50, `+${upgrade.value}`, '#44ff44');
+        }
+        break;
+
+      case 'weapon_unlock':
+        this.unlockWeapon(upgrade.weaponId);
         break;
     }
 
     this.drawHealthBar();
+    this.updateHud();
   }
 
-  upgradeWeapon(upgrade) {
-    const weaponMap = {
-      'knife': 'knifeWeapon',
-      'garlic': 'garlicWeapon',
-    };
-
-    const weaponConfig = weaponMap[upgrade.weapon];
-    if (!weaponConfig) return;
-
-    if (upgrade.isMultiplier) {
-      CONFIG[weaponConfig][upgrade.stat] *= (1 + upgrade.value);
-    } else {
-      CONFIG[weaponConfig][upgrade.stat] += upgrade.value;
-    }
-
-    if (upgrade.weapon === 'knife' && upgrade.stat === 'count') {
-      this.refreshKnifeWeapon();
-    }
-    if (upgrade.weapon === 'garlic' && upgrade.stat === 'radius') {
-      this.refreshGarlicWeapon();
-    }
+  getAvailableWeaponUnlockChoices() {
+    return Object.values(CONFIG.weapons.definitions)
+      .filter(definition => !this.weaponState.has(definition.id))
+      .map(definition => ({
+        id: `unlock_${definition.id}`,
+        name: `Unlock ${definition.name}`,
+        description: definition.unlockDescription,
+        type: 'weapon_unlock',
+        weaponId: definition.id,
+        icon: definition.icon,
+      }));
   }
 
-  refreshKnifeWeapon() {
-    const knifeIndex = this.weapons.findIndex(w => w.name === 'Knife');
-    if (knifeIndex !== -1) {
-      this.weapons[knifeIndex].destroy();
-      this.weapons[knifeIndex] = new KnifeWeapon(this, CONFIG.knifeWeapon);
-    }
-  }
+  unlockWeapon(weaponId) {
+    if (this.weaponState.has(weaponId) || this.weapons.length >= CONFIG.weapons.slots) return;
 
-  refreshGarlicWeapon() {
-    const garlicIndex = this.weapons.findIndex(w => w.name === 'Garlic Aura');
-    if (garlicIndex !== -1) {
-      this.weapons[garlicIndex].destroy();
-      this.weapons[garlicIndex] = new GarlicWeapon(this, CONFIG.garlicWeapon);
-    }
+    const weapon = this.createWeaponInstance(weaponId);
+    if (!weapon) return;
+
+    this.weaponState.set(weaponId, weapon.stats);
+    this.weapons.push(weapon);
+    this.updateHud();
   }
 
   hideUpgradeMenu() {
@@ -495,9 +748,19 @@ export class GameScene extends Phaser.Scene {
     this.waveTimer.paused = false;
     if (this.spawnTimer) this.spawnTimer.paused = false;
 
+    if (this.isPauseMenuOpen) {
+      this.hidePauseMenu();
+    }
+
     if (this.pendingLevelUps > 0) {
       this.pendingLevelUps--;
       this.time.delayedCall(100, () => this.showUpgradeMenu());
+      return;
+    }
+
+    if (this.pendingStore) {
+      this.pendingStore = false;
+      this.showStore();
     }
   }
 
@@ -515,17 +778,76 @@ export class GameScene extends Phaser.Scene {
       left: Phaser.Input.Keyboard.KeyCodes.A,
       right: Phaser.Input.Keyboard.KeyCodes.D,
     });
+    this.escapeKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+    this.escapeKey.on('down', () => {
+      if (this.isUpgradeMenuOpen || this.isStoreOpen) {
+        return;
+      }
+      if (this.isPauseMenuOpen) {
+        this.hidePauseMenu();
+      } else {
+        this.showPauseMenu();
+      }
+    });
   }
 
-  initializeWeapons() {
+  initializeCombatLoadout(starterWeaponId) {
     this.weapons = [];
-    this.addWeapon(new KnifeWeapon(this, CONFIG.knifeWeapon));
-    this.addWeapon(new GarlicWeapon(this, CONFIG.garlicWeapon));
+    this.abilities = [];
+    this.weaponState.clear();
+    this.abilityState.clear();
+
+    if (starterWeaponId) {
+      this.unlockWeapon(starterWeaponId);
+    } else {
+      CONFIG.weapons.starter.forEach(weaponId => {
+        this.unlockWeapon(weaponId);
+      });
+    }
+
+    CONFIG.abilities.starter.forEach(abilityId => {
+      this.unlockAbility(abilityId);
+    });
   }
 
-  addWeapon(weapon) {
-    if (this.weapons.length < CONFIG.weapons.slots) {
-      this.weapons.push(weapon);
+  unlockAbility(abilityId) {
+    if (this.abilityState.has(abilityId)) return;
+
+    const ability = this.createAbilityInstance(abilityId);
+    if (!ability) return;
+
+    this.abilityState.set(abilityId, ability.stats);
+    this.abilities.push(ability);
+    this.updateHud();
+  }
+
+  createWeaponInstance(weaponId) {
+    const definition = CONFIG.weapons.definitions[weaponId];
+    if (!definition) return null;
+
+    const stats = structuredClone(definition.baseStats);
+
+    switch (definition.category) {
+      case 'melee':
+        return new KnifeWeapon(this, definition, stats);
+      case 'ranged':
+        return new FirearmWeapon(this, definition, stats);
+      default:
+        return null;
+    }
+  }
+
+  createAbilityInstance(abilityId) {
+    const definition = CONFIG.abilities.definitions[abilityId];
+    if (!definition) return null;
+
+    const stats = structuredClone(definition.baseStats);
+
+    switch (abilityId) {
+      case 'damageAura':
+        return new DamageAuraAbility(this, definition, stats);
+      default:
+        return null;
     }
   }
 
@@ -534,10 +856,11 @@ export class GameScene extends Phaser.Scene {
     this.isPaused = false;
     this.enemiesSpawned = 0;
     this.timeRemaining = CONFIG.waves.duration;
-    
+    this.currentWaveEnemyStats = this.getEnemyStatsForWave(this.currentWave);
+
     this.updateUI();
     this.hideOverlay();
-    
+
     this.waveTimer = this.time.addEvent({
       delay: 1000,
       callback: this.onTimerTick,
@@ -570,9 +893,23 @@ export class GameScene extends Phaser.Scene {
     if (this.enemiesSpawned >= maxEnemies) return;
 
     const pos = this.getSpawnPosition();
-    const enemy = new Enemy(this, pos.x, pos.y);
+    const enemy = new Enemy(this, pos.x, pos.y, this.currentWaveEnemyStats);
     this.enemies.push(enemy);
     this.enemiesSpawned++;
+  }
+
+  getEnemyStatsForWave(waveNumber) {
+    const waveIndex = Math.max(waveNumber - 1, 0);
+    const { baseHp, baseSpeed } = CONFIG.enemy;
+    const { healthGrowth, healthExponent, speedGrowth, speedExponent } = CONFIG.waves.enemyScaling;
+
+    const healthMultiplier = 1 + (healthGrowth * Math.pow(waveIndex, healthExponent));
+    const speedMultiplier = 1 + (speedGrowth * Math.pow(waveIndex, speedExponent));
+
+    return {
+      hp: Math.round(baseHp * healthMultiplier),
+      speed: Math.round(baseSpeed * speedMultiplier),
+    };
   }
 
   getSpawnPosition() {
@@ -626,16 +963,29 @@ export class GameScene extends Phaser.Scene {
     this.clearEnemies();
     this.clearXpGems();
 
+    const crystalsEarned = this.convertScoreToCrystals();
+    this.pendingStore = true;
+
     if (this.currentWave >= CONFIG.waves.count) {
-      this.showVictory();
+      this.showVictory(crystalsEarned);
     } else {
-      this.showWaveComplete();
+      this.showWaveComplete(crystalsEarned);
     }
   }
 
   clearEnemies() {
     this.enemies.forEach(enemy => enemy.destroy());
     this.enemies = [];
+  }
+
+  clearWeapons() {
+    this.weapons.forEach(weapon => weapon.destroy());
+    this.weapons = [];
+  }
+
+  clearAbilities() {
+    this.abilities.forEach(ability => ability.destroy());
+    this.abilities = [];
   }
 
   clearXpGems() {
@@ -661,39 +1011,20 @@ export class GameScene extends Phaser.Scene {
     this.restartButton.container.setVisible(false);
   }
 
-  showWaveComplete() {
-    this.showOverlay('Wave Complete!', '', '#44ff44');
-    
-    let countdown = Math.ceil(CONFIG.waves.intermissionDuration / 1000);
-    this.overlaySubtitle.setText(`Next wave in ${countdown}...`);
-    this.overlaySubtitle.setVisible(true);
-    
-    this.intermissionTimer = this.time.addEvent({
-      delay: 1000,
-      callback: () => {
-        countdown--;
-        if (countdown > 0) {
-          this.overlaySubtitle.setText(`Next wave in ${countdown}...`);
-        }
-      },
-      callbackScope: this,
-      repeat: countdown - 1,
-    });
-    
-    this.time.delayedCall(CONFIG.waves.intermissionDuration, () => {
-      if (this.intermissionTimer) this.intermissionTimer.remove();
-      this.currentWave++;
-      this.startWave();
+  showWaveComplete(crystalsEarned = 0) {
+    const crystalText = crystalsEarned > 0 ? `+${crystalsEarned} crystals` : 'No crystals earned';
+    this.showOverlay('Wave Complete!', crystalText, '#44ff44');
+
+    this.time.delayedCall(600, () => {
+      if (this.isStoreOpen || !this.pendingStore) return;
+      this.hideOverlay();
+      this.showStore();
     });
   }
 
-  showVictory() {
-    this.showOverlay(
-      'VICTORY!',
-      `Level ${this.playerLevel} | Final Score: ${this.playerLevel * 1000}`,
-      '#ffdd44',
-      true
-    );
+  showVictory(crystalsEarned = 0) {
+    const subtitle = `Level ${this.playerLevel} | Crystals +${crystalsEarned}`;
+    this.showOverlay('VICTORY!', subtitle, '#ffdd44', true);
   }
 
   showGameOver() {
@@ -705,10 +1036,13 @@ export class GameScene extends Phaser.Scene {
     if (this.intermissionTimer) {
       this.intermissionTimer.remove();
     }
+
+    this.clearWeapons();
+    this.clearAbilities();
     
     this.showOverlay(
       'GAME OVER',
-      `Level ${this.playerLevel} | Score: ${this.playerLevel * 1000}`,
+      `Level ${this.playerLevel} | Score: ${this.score}`,
       '#ff4444',
       true
     );
@@ -723,15 +1057,17 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(time, delta) {
-    if (this.isPaused && !this.isUpgradeMenuOpen) return;
+    if (this.isPaused) return;
 
     this.handlePlayerMovement();
     this.updateEnemies(delta);
     this.updateWeapons(delta);
+    this.updateAbilities(delta);
     this.updateXpGems(delta);
     this.checkPlayerEnemyCollision();
     this.updateDamageNumbers(delta);
     this.checkWaveCleared();
+    this.updateHud();
   }
 
   checkWaveCleared() {
@@ -809,6 +1145,358 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  updateAbilities(delta) {
+    this.abilities.forEach(ability => {
+      ability.update(this.player, this.enemies, delta);
+    });
+  }
+
+  getNearestEnemyInSight(x, y) {
+    const sightRadius = CONFIG.player.sightRadius * this.playerStats.sightMultiplier;
+    let nearestEnemy = null;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+
+    this.enemies.forEach(enemy => {
+      if (!enemy.active) return;
+
+      const distance = Math.sqrt(
+        Math.pow(enemy.x - x, 2) + Math.pow(enemy.y - y, 2)
+      );
+
+      if (distance <= sightRadius && distance <= nearestDistance) {
+        nearestDistance = distance;
+        nearestEnemy = enemy;
+      }
+    });
+
+    return nearestEnemy;
+  }
+
+  updateHud() {
+    if (!this.weaponHudText || !this.itemHudText) return;
+
+    const weaponLines = this.weapons.map(weapon => {
+      if (weapon.category === 'ranged') {
+        const mag = weapon.stats.magazineSize;
+        const ammo = weapon.ammoInMagazine ?? mag;
+        const reloading = weapon.reloadRemaining > 0;
+        const reloadText = reloading ? ` (Reload ${Math.ceil(weapon.reloadRemaining / 100) / 10}s)` : '';
+        return `${weapon.definition.icon} ${weapon.name} ${ammo}/${mag}${reloadText}`;
+      }
+
+      const countText = weapon.stats.count ? ` x${weapon.stats.count}` : '';
+      return `${weapon.definition.icon} ${weapon.name}${countText}`;
+    });
+
+    this.weaponHudText.setText(weaponLines.length ? weaponLines : ['No weapons']);
+
+    const itemLines = [];
+
+    const statDisplay = {
+      damageMultiplier: { label: 'Damage', format: v => `${Math.round((v - 1) * 100)}%` },
+      speedMultiplier: { label: 'Speed', format: v => `${Math.round((v - 1) * 100)}%` },
+      xpMagnetMultiplier: { label: 'XP Magnet', format: v => `${Math.round((v - 1) * 100)}%` },
+      damageReduction: { label: 'Armor', format: v => `${Math.round(v * 100)}%` },
+      sightMultiplier: { label: 'Sight', format: v => `${Math.round((v - 1) * 100)}%` },
+      maxHpBonus: { label: 'Max HP', format: v => `+${v}` },
+    };
+
+    Object.entries(statDisplay).forEach(([key, meta]) => {
+      const value = this.playerStats[key];
+      if ((key === 'damageReduction' && value <= 0) || (key !== 'damageReduction' && value <= (key === 'maxHpBonus' ? 0 : 1))) {
+        return;
+      }
+      itemLines.push(`${meta.label}: ${meta.format(value)}`);
+    });
+
+    if (this.abilities.length) {
+      this.abilities.forEach(ability => {
+        itemLines.push(`${ability.definition.icon} ${ability.name}`);
+      });
+    }
+
+    this.itemHudText.setText(itemLines.length ? itemLines : ['No bonuses']);
+
+    if (this.scoreText) {
+      this.scoreText.setText(`Score: ${this.score}`);
+    }
+    if (this.crystalText) {
+      this.crystalText.setText(`Crystals: ${this.crystals}`);
+    }
+  }
+
+  showStore() {
+    this.isStoreOpen = true;
+    this.isPaused = true;
+    if (this.waveTimer) this.waveTimer.paused = true;
+    if (this.spawnTimer) this.spawnTimer.paused = true;
+
+    this.storeBg.setVisible(true);
+    this.storeTitle.setVisible(true);
+    this.storeSubtitle.setVisible(true);
+    this.storeContinueButton.container.setVisible(true);
+
+    this.clearStoreCards();
+    this.generateStoreChoices();
+  }
+
+  showPauseMenu() {
+    if (this.isPauseMenuOpen) return;
+
+    this.isPauseMenuOpen = true;
+    this.isPaused = true;
+    if (this.waveTimer) this.waveTimer.paused = true;
+    if (this.spawnTimer) this.spawnTimer.paused = true;
+
+    this.pauseMenuBg.setVisible(true);
+    this.pauseMenuTitle.setVisible(true);
+    this.pauseMenuSubtitle.setVisible(true);
+    this.pauseRestartButton.container.setVisible(true);
+    this.pauseStatsBg.setVisible(true);
+    this.pauseStatsTitle.setVisible(true);
+    this.pauseWeaponsText.setVisible(true);
+    this.pauseItemsText.setVisible(true);
+    this.pauseStatsText.setVisible(true);
+
+    this.updatePauseMenuData();
+  }
+
+  hidePauseMenu() {
+    this.closePauseConfirm();
+    this.pauseMenuBg.setVisible(false);
+    this.pauseMenuTitle.setVisible(false);
+    this.pauseMenuSubtitle.setVisible(false);
+    this.pauseRestartButton.container.setVisible(false);
+    this.pauseStatsBg.setVisible(false);
+    this.pauseStatsTitle.setVisible(false);
+    this.pauseWeaponsText.setVisible(false);
+    this.pauseItemsText.setVisible(false);
+    this.pauseStatsText.setVisible(false);
+
+    this.isPauseMenuOpen = false;
+    this.isPaused = false;
+    if (this.waveTimer) this.waveTimer.paused = false;
+    if (this.spawnTimer) this.spawnTimer.paused = false;
+  }
+
+  openPauseConfirm() {
+    if (this.isPauseConfirmOpen) return;
+    this.isPauseConfirmOpen = true;
+
+    this.pauseConfirmBg.setVisible(true);
+    this.pauseConfirmTitle.setVisible(true);
+    this.pauseConfirmSubtitle.setVisible(true);
+    this.pauseConfirmYes.container.setVisible(true);
+    this.pauseConfirmNo.container.setVisible(true);
+  }
+
+  closePauseConfirm() {
+    this.isPauseConfirmOpen = false;
+    this.pauseConfirmBg.setVisible(false);
+    this.pauseConfirmTitle.setVisible(false);
+    this.pauseConfirmSubtitle.setVisible(false);
+    this.pauseConfirmYes.container.setVisible(false);
+    this.pauseConfirmNo.container.setVisible(false);
+  }
+
+  updatePauseMenuData() {
+    if (!this.pauseWeaponsText || !this.pauseItemsText || !this.pauseStatsText) return;
+
+    const weaponLines = this.weapons.length
+      ? this.weapons.map(weapon => `${weapon.definition.icon} ${weapon.name}`)
+      : ['No weapons'];
+    this.pauseWeaponsText.setText(['Weapons', ...weaponLines]);
+
+    const itemLines = [];
+    const statDisplay = {
+      damageMultiplier: { label: 'Damage', format: v => `${Math.round((v - 1) * 100)}%` },
+      speedMultiplier: { label: 'Speed', format: v => `${Math.round((v - 1) * 100)}%` },
+      xpMagnetMultiplier: { label: 'XP Magnet', format: v => `${Math.round((v - 1) * 100)}%` },
+      damageReduction: { label: 'Armor', format: v => `${Math.round(v * 100)}%` },
+      sightMultiplier: { label: 'Sight', format: v => `${Math.round((v - 1) * 100)}%` },
+      maxHpBonus: { label: 'Max HP', format: v => `+${v}` },
+    };
+
+    Object.entries(statDisplay).forEach(([key, meta]) => {
+      const value = this.playerStats[key];
+      if ((key === 'damageReduction' && value <= 0) || (key !== 'damageReduction' && value <= (key === 'maxHpBonus' ? 0 : 1))) {
+        return;
+      }
+      itemLines.push(`${meta.label}: ${meta.format(value)}`);
+    });
+
+    if (this.abilities.length) {
+      this.abilities.forEach(ability => {
+        itemLines.push(`${ability.definition.icon} ${ability.name}`);
+      });
+    }
+
+    const itemsText = itemLines.length ? itemLines : ['No items'];
+    this.pauseItemsText.setText(['Items', ...itemsText]);
+
+    const statsLines = [
+      `Level: ${this.playerLevel}`,
+      `HP: ${Math.ceil(this.playerHp)}/${this.playerMaxHp}`,
+      `Score: ${this.score}`,
+      `Crystals: ${this.crystals}`,
+      `Sight Radius: ${Math.round(CONFIG.player.sightRadius * this.playerStats.sightMultiplier)}`,
+    ];
+    this.pauseStatsText.setText(['Stats', ...statsLines]);
+  }
+
+  hideStore() {
+    this.clearStoreCards();
+    this.storeBg.setVisible(false);
+    this.storeTitle.setVisible(false);
+    this.storeSubtitle.setVisible(false);
+    this.storeContinueButton.container.setVisible(false);
+
+    this.isStoreOpen = false;
+    this.isPaused = false;
+    if (this.waveTimer) this.waveTimer.paused = false;
+    if (this.spawnTimer) this.spawnTimer.paused = false;
+
+    if (this.intermissionTimer) this.intermissionTimer.remove();
+    this.currentWave++;
+    this.startWave();
+
+    this.updateHud();
+  }
+
+  clearStoreCards() {
+    this.storeCards.forEach(card => {
+      card.container.destroy();
+      if (card.hitArea) card.hitArea.destroy();
+    });
+    this.storeCards = [];
+  }
+
+  generateStoreChoices() {
+    const { itemsPerVisit, pool } = CONFIG.store;
+    const available = pool.filter(item => {
+      if (item.type === 'weapon_unlock') {
+        return !this.weaponState.has(item.weaponId);
+      }
+      return true;
+    });
+
+    const choices = [];
+    const working = [...available];
+    for (let i = 0; i < Math.min(itemsPerVisit, working.length); i++) {
+      const randomIndex = Phaser.Math.Between(0, working.length - 1);
+      choices.push(working.splice(randomIndex, 1)[0]);
+    }
+
+    const cardW = 260;
+    const cardH = 300;
+    const spacing = 30;
+    const totalWidth = (choices.length * cardW) + ((choices.length - 1) * spacing);
+    const startX = (CONFIG.game.width - totalWidth) / 2 + cardW / 2;
+    const y = CONFIG.game.height / 2 + 20;
+
+    choices.forEach((item, index) => {
+      const x = startX + index * (cardW + spacing);
+      const card = this.createStoreCard(x, y, cardW, cardH, item);
+      this.storeCards.push(card);
+    });
+  }
+
+  createStoreCard(x, y, w, h, item) {
+    const container = this.add.container(x, y);
+    container.setDepth(270);
+
+    const bg = this.add.graphics();
+    bg.fillStyle(0x2a2a4e, 1);
+    bg.fillRoundedRect(-w / 2, -h / 2, w, h, 12);
+    bg.lineStyle(3, 0x6a6a9e, 1);
+    bg.strokeRoundedRect(-w / 2, -h / 2, w, h, 12);
+    container.add(bg);
+
+    const icon = this.add.text(0, -h / 2 + 55, item.icon, { fontSize: '48px' });
+    icon.setOrigin(0.5, 0.5);
+    container.add(icon);
+
+    const title = this.add.text(0, -h / 2 + 110, item.name, {
+      fontSize: '20px',
+      fontFamily: 'Arial',
+      color: '#ffffff',
+      fontStyle: 'bold',
+      align: 'center',
+      wordWrap: { width: w - 20 },
+    });
+    title.setOrigin(0.5, 0.5);
+    container.add(title);
+
+    const desc = this.add.text(0, -h / 2 + 165, item.description, {
+      fontSize: '14px',
+      fontFamily: 'Arial',
+      color: '#aaaaaa',
+      align: 'center',
+      wordWrap: { width: w - 30 },
+    });
+    desc.setOrigin(0.5, 0.5);
+    container.add(desc);
+
+    const price = this.add.text(0, h / 2 - 40, `Price: ${item.price}💎`, {
+      fontSize: '16px',
+      fontFamily: 'Arial',
+      color: '#44ffdd',
+      fontStyle: 'bold',
+    });
+    price.setOrigin(0.5, 0.5);
+    container.add(price);
+
+    const hitArea = this.add.rectangle(x, y, w, h, 0x000000, 0);
+    hitArea.setInteractive({ useHandCursor: true });
+
+    hitArea.on('pointerover', () => {
+      bg.clear();
+      bg.fillStyle(0x3a3a5e, 1);
+      bg.fillRoundedRect(-w / 2, -h / 2, w, h, 12);
+      bg.lineStyle(3, 0xffdd44, 1);
+      bg.strokeRoundedRect(-w / 2, -h / 2, w, h, 12);
+    });
+
+    hitArea.on('pointerout', () => {
+      bg.clear();
+      bg.fillStyle(0x2a2a4e, 1);
+      bg.fillRoundedRect(-w / 2, -h / 2, w, h, 12);
+      bg.lineStyle(3, 0x6a6a9e, 1);
+      bg.strokeRoundedRect(-w / 2, -h / 2, w, h, 12);
+    });
+
+    hitArea.setDepth(271);
+
+    hitArea.on('pointerdown', () => {
+      this.purchaseStoreItem(item);
+    });
+
+    return { container, bg, hitArea };
+  }
+
+  purchaseStoreItem(item) {
+    if (this.crystals < item.price) {
+      return;
+    }
+
+    if (item.type === 'weapon_unlock') {
+      if (this.weaponState.has(item.weaponId)) return;
+      this.crystals -= item.price;
+      this.unlockWeapon(item.weaponId);
+    } else if (item.type === 'stat') {
+      this.crystals -= item.price;
+      this.playerStats[item.stat] += item.value;
+
+      if (item.stat === 'maxHpBonus') {
+        this.playerMaxHp = CONFIG.player.maxHp + this.playerStats.maxHpBonus;
+        this.playerHp = Math.min(this.playerHp, this.playerMaxHp);
+      }
+    }
+
+    this.updateHud();
+    this.generateStoreChoices();
+  }
+
   updateXpGems(delta) {
     const attractRadius = CONFIG.xpGem.attractRadius * this.playerStats.xpMagnetMultiplier;
     
@@ -819,6 +1507,15 @@ export class GameScene extends Phaser.Scene {
       }
       return false;
     });
+  }
+
+  updateScoreInOverlay(title, subtitle) {
+    if (!this.overlayTitle || !this.overlaySubtitle) return;
+
+    this.overlayTitle.setText(title);
+    this.overlaySubtitle.setText(subtitle);
+    this.overlayTitle.setVisible(true);
+    this.overlaySubtitle.setVisible(true);
   }
 
   checkPlayerEnemyCollision() {
@@ -872,12 +1569,26 @@ export class GameScene extends Phaser.Scene {
     
     if (killed) {
       this.enemies = this.enemies.filter(e => e !== enemy);
+      this.addScore(enemy.scoreValue);
     }
   }
 
   spawnXpGem(x, y, value) {
     const gem = new XpGem(this, x, y, value);
     this.xpGems.push(gem);
+  }
+
+  addScore(amount) {
+    this.score += amount;
+  }
+
+  convertScoreToCrystals() {
+    const crystalsEarned = Math.floor(this.score / CONFIG.score.pointsPerCrystal);
+    if (crystalsEarned > 0) {
+      this.crystals += crystalsEarned;
+      this.score -= crystalsEarned * CONFIG.score.pointsPerCrystal;
+    }
+    return crystalsEarned;
   }
 
   collectXp(amount) {
