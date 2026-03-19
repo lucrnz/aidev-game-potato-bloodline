@@ -377,22 +377,22 @@ export class GameScene extends Phaser.Scene {
     });
     this.hudContainer.add(this.itemHudText);
 
-    this.scoreText = this.add.text(CONFIG.game.width / 2, 24, 'Score: 0', {
+    this.scoreText = this.add.text(CONFIG.game.width - 20, 24, 'Score: 0', {
       fontSize: '18px',
       fontFamily: 'Arial',
       color: '#ffffff',
       fontStyle: 'bold',
     });
-    this.scoreText.setOrigin(0.5, 0);
+    this.scoreText.setOrigin(1, 0);
     this.scoreText.setDepth(120);
 
-    this.crystalText = this.add.text(CONFIG.game.width / 2, 44, 'Crystals: 0', {
+    this.crystalText = this.add.text(CONFIG.game.width - 20, 44, 'Crystals: 0', {
       fontSize: '16px',
       fontFamily: 'Arial',
       color: '#44ffdd',
       fontStyle: 'bold',
     });
-    this.crystalText.setOrigin(0.5, 0);
+    this.crystalText.setOrigin(1, 0);
     this.crystalText.setDepth(120);
 
     this.updateHud();
